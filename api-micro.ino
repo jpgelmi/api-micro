@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <BluetoothSerial.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -14,10 +15,11 @@
 #define BUTTON_PIN 12  // Pin donde está conectado el botón
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+BluetoothSerial SerialBT;
 
-// Replace with your network credentials
-const char* ssid = "WIFI_SSID";
-const char* password = "WIFI_PASSWORD";
+char ssid[32] = "";
+char password[32] = "";
+bool wifiConfigured = false;
 
 // API URL for the bus stop
 const char* apiUrl = "https://api.xor.cl/red/bus-stop/PC836";
@@ -39,6 +41,7 @@ String serviceInfoC09 = "";
 
 void setup() {
   Serial.begin(115200);
+  SerialBT.begin("ESP32_BusInfo"); // Bluetooth device name
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);  // Configura el pin del botón con una resistencia pull-up interna
 
@@ -53,27 +56,15 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println("Connecting to WiFi...");
+  display.println("Awaiting WiFi Config...");
   display.display();
-  
+
+  // Wait for WiFi credentials via Bluetooth
+  waitForBluetoothConfig();
+
   // Connect to Wi-Fi
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-    display.setCursor(0, 10);
-    display.println("Connecting...");
-    display.display();
-  }
-  Serial.println("Connected to WiFi");
-
-  // Display connection success
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("Connected to WiFi");
-  display.display();
-  delay(2000); // Display "Connected" for 2 seconds
-
+  connectToWiFi();
+  
   // Configure time for Chile timezone
   configTime(-4 * 3600, 0, "pool.ntp.org", "time.nist.gov");
 
@@ -119,6 +110,54 @@ void loop() {
     previousMillis = currentMillis;
     updateBusInfo(); // Llamar a la API cada 15 segundos
   }
+}
+
+void waitForBluetoothConfig() {
+  String incoming = "";
+  while (!wifiConfigured) {
+    if (SerialBT.available()) {
+      char received = SerialBT.read();
+      if (received == '\n') {
+        if (incoming.startsWith("SSID:")) {
+          incoming.remove(0, 5);
+          incoming.toCharArray(ssid, sizeof(ssid));
+        } else if (incoming.startsWith("PASS:")) {
+          incoming.remove(0, 5);
+          incoming.toCharArray(password, sizeof(password));
+          wifiConfigured = true;
+        }
+        incoming = "";
+      } else {
+        incoming += received;
+      }
+    }
+  }
+  Serial.println("Received SSID: " + String(ssid));
+  Serial.println("Received Password: " + String(password));
+}
+
+void connectToWiFi() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Connecting to WiFi...");
+  display.display();
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+    display.setCursor(0, 10);
+    display.println("Connecting...");
+    display.display();
+  }
+  Serial.println("Connected to WiFi");
+
+  // Display connection success
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Connected to WiFi");
+  display.display();
+  delay(2000); // Display "Connected" for 2 seconds
 }
 
 void updateBusInfo() {
